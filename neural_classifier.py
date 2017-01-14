@@ -1,4 +1,13 @@
 #! usr/bin/env python3
+# Andrew Johnson
+# January 2017
+
+"""
+Generates clusters of random points with a Gaussian distribution belonging
+to one of two labels (red or blue), such that they cannot be classified
+by a linear classifier. Using keras, creates a feedforward neural network
+that classifies them with high accuracy.
+"""
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,9 +21,9 @@ def generate_data(size = 100, train_percent = 75):
     """Randomly generates 4 clusters of 2 colors and displays a plot
     Args:
         size: Number of points in each cluster
-        train_percent = what percent to use for training
+        train_percent: what percent to use for training
             save for vs. testing
-    Returns: A tuple containing the following
+    Returns: A tuple containing the following:
         training set data, training set labels, 
         testing set data, testing set labels
     """
