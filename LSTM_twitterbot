@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Trains a character-based neural network with Long Short-Term 
+Memory on all of James Joyce's works (0.6 million tokens).
+Generates sample tweets and automatically posts them to
+twitter at 10 minute intervals.
+"""
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import keras
+from keras.models import Sequential
+from keras.layers import Dense, Activation
+from keras.layers.core import Dropout
+from keras.layers.recurrent import LSTM
+from keras.utils.np_utils import to_categorical
+from keras.callbacks import History 
+from keras.models import model_from_json
+import pylab
+import random
+import time
+import datetime
+import tweepy
+from credentials import * # Twitter credentials. Not included here.
+from time import sleep
+
+
+def get_wordlist(filename):
+    """Open file and tokenize"""
+    with open(filename, encoding="utf-8") as f:
+        text = f.read()
+    return text.split()
+
+
+# Import and process texts
+text = get_wordlist("art.txt")
+text += get_wordlist("cha.txt")
+text += get_wordlist("dub.txt")
+text += get_wordlist("fin.txt")
+text += get_wordlist("ull.txt")
+print(len(text), "tokens")
+
+
+def mark_words(wordlist, start_symbol="≈", stop_symbol="¡"):
+    """Add start/end markers to words"""
+    allwords = []
+    for word in wordlist:
+        allwords.append(start_symbol + word + stop_symbol)
+    return allwords
+
+
+allwords = mark_words(text)
+# Concatenate everything together into one long string
+allstring = "".join(allwords)
+allchar = set(allstring)
+# Ensure allchar will have the same order each time
+allchar = sorted(list(allchar)) 
+
+
+def make_dict(allchar):
+    """Get unique characters
+    Make dictionary with numerical values for each character key
+    Also makes the inverse dictionary of that
+    """
+    char_dict = zip(allchar, range(len(allchar)))
+    char_dict = dict(char_dict)
+    inverse_dict = zip(range(len(allchar)), allchar)
+    inverse_dict = dict(inverse_dict)
+    return char_dict, inverse_dict
+    
+char_dict, inverse_dict = make_dict(allchar)
+print("Character dictionaries made")
+
+
+def get_xy(allstring=allstring, char_dict=char_dict, seqlen=5):
+    """Convert text to list of numbers for each character"""
+    text_as_int = [char_dict[ch] for ch in list(allstring)]
+    dataX = [] #Numerical represenation of consecutive characters (of length seqlen)
+    dataY = [] #Numerical representation of the following character
+    #eg: seqlen=5, dataX: "fooba", dataY: "r"
+    for i in range(len(text_as_int) - seqlen):
+        dataX += [text_as_int[i:i+seqlen]]
+        dataY += [text_as_int[i+seqlen]]
+    y = to_categorical(dataY) #Convert to one-hot encoding
+    x = np.reshape(dataX, (len(dataX), seqlen, 1))
+    x = x/len(char_dict) #NN prefers floats
+    return x,y
+
+
+x,y = get_xy(seqlen=5)
+print("Text preprocessed for model")
+
+
+def make_model(x=x, y=y):
+    """Build model architecture"""
+    model = Sequential()
+    model.add(LSTM(256, input_shape=(x.shape[1], x.shape[2])))
+    model.add(Dropout(0.2))
+    model.add(Dense(100, activation="relu")) #Another HL
+    model.add(Dense(100, activation="relu")) #Another HL
+    model.add(Dense(y.shape[1], activation="softmax"))
+    model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=['accuracy'])
+    print("Model generated")
+    return model
+    
+
+model = make_model()
+
+
+def load_weights(load_from):
+    """Loads model weights from .h5 file"""
+    # load weights into new model
+    model.load_weights(load_from)
+    model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=['accuracy'])
+    print("Loaded model from disk")
+
+
+def train_model(epochs, past_max, save=True):
+    """Trains model for a certain number of epochs
+    Optionally saves weights. past_max refers to
+    the number of epochs trained so far."""
+    for i in range(epochs):
+        past_max += 1
+        history = History()
+        model.fit(x,y, batch_size=128, nb_epoch=1, callbacks=[history])
+        name = "joy"+str(past_max)+".h5"
+        stats = str(history.history)
+        print("Stats:", stats)
+        # Save loss and accuracy information to file
+        with open("history.txt", "a") as f:
+            f.write(stats+"\n")
+        if save:
+            model.save_weights(name)
+            print("Saved as:", name)
+    
+
+def run_long_time(timelimit, past_max):
+    """Trains continuously until a specified time.
+    timelimit is the hour after which no new epochs will
+    start being trained. Note: if an epoch begins training
+    at 7:59 and the timelimit is 8:00, the training will continue
+    until that epich is finished."""
+    t = time.time()
+    t = int(datetime.datetime.fromtimestamp(t).strftime('%H'))
+    if t > timelimit: #eg: If you start at 23:00 and want to run until 7:00
+        t = -1
+    while t < timelimit:
+        past_max += 1
+        train_model(1, past_max)
+        print("Saved during", t, "o'clock")
+        t = time.time()
+        t = int(datetime.datetime.fromtimestamp(t).strftime('%H'))
+        if t > 20:
+            t = -1
+    print(history.history)
+    
+
+def predict(seed, seqlen=5, selection="prob"):
+    """Given a string of length seqlen, predicts the following 
+    character using one of 3 selection methods:
+    -argmax: Just selects the most likely next character
+    -prob: Selects the next character based on the probability of each
+    -[int]: Narrows down to the top-n next characters and samples based on 
+            their probabilities"""
+    #Convert to numbers
+    base = [[char_dict[ch]] for ch in seed]
+    candidate = np.reshape(base, (1,seqlen,1))
+    candidate = candidate/float(len(char_dict))
+    #Array of pre-softmax one-hot
+    prediction = model.predict(candidate)
+    
+    if selection == "prob":
+        #Sometimes get a float error where probabilites don't sum exactly to 1.0.
+        #This raises an error with np.random.choice unfortunately.
+        guess = "error"
+        pred_len = len(prediction)
+        while guess == "error":
+            try:
+                guess = int(np.random.choice(range(pred_len), 1, p=prediction))
+            except: #Inelegant way to try to make it sum to 1.0
+                float_error = 1 - sum(prediction) 
+                prediction[np.random.choice(range(pred_len))] += float_error
+    elif selection == "argmax":
+        guess = np.argmax(prediction)
+    elif type(selection) == int:
+        #Pick from n-best options
+        n = selection
+        prediction = prediction.tolist()[0]
+        withindex = [(prediction[i],i) for i in range(len(prediction))]
+        # Get only the n best predictions
+        withindex = sorted(withindex, reverse=True)[:n]
+        index = [entry[1] for entry in withindex]
+        prob = [entry[0] for entry in withindex]
+        total = sum(prob)
+        prob = [entry/total for entry in prob]
+        guess = int(np.random.choice(index, 1, p=prob))
+    else: #Default is argmax
+        guess = np.argmax(prediction)
+        
+    return inverse_dict[guess]
+
+
+def predict_multiple(how_many, seqlen, selection):
+    """Predicts the next n (how_many) characters"""
+    seed = ""
+    while len(seed) < seqlen:
+        rand_word = random.choice(allwords)
+        seed = rand_word[:seqlen]
+    total = [seed]
+    next_seed = predict(seed, seqlen, selection)
+    total += [next_seed]
+    
+    for i in range(how_many):
+        seed = seed[1:] + next_seed
+        next_seed = predict(seed, seqlen, selection)
+        total += [next_seed][-1]
+    total = "".join(total)
+    total = total.replace("¡≈", "¬") # To reflect actual length
+    return total
+
+
+def shorten(tweet, maxlen=100):
+    """Shortens the tweet to fit within the character limit, and
+    possibly somewhat more to add variation."""
+    maxlen += random.randint(1,40) #length_variation 
+    #Get only full words
+    markers = ["≈", "¡", "¬"]
+    #markers = ["≈", "¡", "¬", "!", "?", "."]
+    i = maxlen
+    while tweet[i] not in markers:
+        i -= 1
+    tweet = tweet[:i]
+    tweet = tweet.replace("¡", "")
+    tweet = tweet.replace("≈", "")
+    tweet = tweet.replace("¬", " ")
+    return tweet
+        
+    
+def save_tweets(number):
+    """Saves a certain number of tweets to a file"""
+    for i in range(number):
+        tweet = predict_multiple(how_many=200, seqlen=5, selection=3)
+        tweet = shorten(tweet)
+        with open("tweets.txt", "a") as f:
+            f.write(tweet+"\n")
+    print(number, "tweets appended to file: tweets.txt")
+        
+
+def make_tweets(seconds_gap=600):
+    """Reads tweets from file and posts one by one
+    at designated time invervals"""
+    auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
+    auth.set_access_token(access_token, access_token_secret)
+    api = tweepy.API(auth)
+    with open("tweets.txt") as f:
+        file_lines=f.readlines()
+    for line in file_lines:
+        try:
+            if line != '\n':
+                print(line)
+                api.update_status(line)
+                sleep(seconds_gap)
+            else:
+                pass
+        except tweepy.TweepError as e:
+            print(e.reason)
+            sleep(2)
+            
+
+if __name__ == "__main__":
+    load_weights("joy50.h5") # Obtained by: train_model(50, 0, save=True)
+    save_tweets(31)
+    make_tweets()
