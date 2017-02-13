@@ -31,9 +31,11 @@ to one of two labels (red or blue), such that they cannot be classified
 by a linear classifier. Using keras, creates a feedforward neural network
 that classifies them with high accuracy.
 
-Architecture:
+Architecture: (*Image generated using https://gist.github.com/anbrjohn/7116fa0b59248375cd0c0371d6107a59)
 
 ![My image](https://github.com/anbrjohn/LangTech/blob/master/FFNNarchitecture.png)
+
+
 
 Random point clusters:
 
