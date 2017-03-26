@@ -2,7 +2,8 @@
 
 Files for Language Technology I at Universität Saarlandes, 2016-2017
 
-##LSTM Twitterbot##
+##LSTM Twitterbot
+
 **"Ere the hour of the twattering of bards in the twitterlitter"
 -Finnegan's Wake**
 
@@ -25,7 +26,9 @@ of the generated tweets seem to reproduce this. Note the assonance in:
 "black the born the stor of the said. Hore of her, a believe the be and sorare off
 the satise tir they was of the"
 
-##Neural Classifier##
+
+##Neural Classifier
+
 Generates clusters of random points with a Gaussian distribution belonging
 to one of two labels (red or blue), such that they cannot be classified
 by a linear classifier. Using keras, creates a feedforward neural network
